@@ -166,7 +166,6 @@ import org.objectweb.asm.ClassReader;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.InputStream;
@@ -4966,23 +4965,17 @@ public final class Ruby implements Constantizable {
             return string;
         }
 
-        // Populate thread-local wrapper
-        try (FStringEqual wrapper = FStringEqual.cached(this, string)) {
-            WeakReference<RubyString.FString> dedupedRef = dedupMap.get(wrapper);
-            RubyString.FString deduped;
+        WeakReference<RubyString.FString> dedupedRef = dedupMap.get(new FStringEqual(string));
+        RubyString.FString deduped;
 
-            if (dedupedRef == null || (deduped = dedupedRef.get()) == null) {
-                // We will insert wrapper one way or another so clear from threadlocal
-                DEDUP_WRAPPER_CACHE.remove();
+        if (dedupedRef == null || (deduped = dedupedRef.get()) == null) {
+            // Ensure we have an FString
+            deduped = string.dupAsFString(this);
 
-                // Ensure we have an FString
-                deduped = string.dupAsFString(this);
-
-                return cacheFString(deduped);
-            }
-
-            return deduped;
+            return cacheFString(deduped);
         }
+
+        return deduped;
     }
 
     /**
@@ -5072,28 +5065,16 @@ public final class Ruby implements Constantizable {
     public RubyStackTraceElement getChdirLocation() { return this.chdirLocation; }
     /**
      * Because RubyString.equals does not consider encoding, and MRI's logic for deduplication does need to consider
-     * encoding, we use a wrapper object as the key. These wrappers need to be used on all get operations, so if we
-     * don't need to insert anything we reuse that wrapper the next time.
+     * encoding, we use a wrapper object as the key. These wrappers need to be used on all get operations.
      *
-     * Wrappers are constructed and thread-local cached in in {@link #DEDUP_WRAPPER_CACHE};
+     * Wrappers are not cached in thread-locals: a thread would keep its wrapper after the runtime is torn down, and
+     * with it the class loader that loaded JRuby.
      */
-    static class FStringEqual implements Closeable {
-        RubyString string;
-
-        static FStringEqual cached(Ruby runtime, RubyString string) {
-            FStringEqual wrapper = runtime.DEDUP_WRAPPER_CACHE.get();
-            wrapper.string = string;
-            return wrapper;
-        }
-
-        FStringEqual() {}
+    static class FStringEqual {
+        final RubyString string;
 
         FStringEqual(RubyString string) {
             this.string = string;
-        }
-
-        public void close() {
-            this.string = null;
         }
 
         public boolean equals(Object other) {
@@ -5116,8 +5097,6 @@ public final class Ruby implements Constantizable {
             return string.hashCode();
         }
     }
-
-    private final ThreadLocal<FStringEqual> DEDUP_WRAPPER_CACHE = ThreadLocal.withInitial(FStringEqual::new);
 
     public int getRuntimeNumber() {
         return runtimeNumber;

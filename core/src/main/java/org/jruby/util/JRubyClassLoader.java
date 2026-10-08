@@ -90,6 +90,7 @@ public class JRubyClassLoader extends ClassDefiningJRubyClassLoader {
             !(url.getProtocol().equals("file") || url.getProtocol().equals("http") || url.getProtocol().equals("https"))) {
             try {
                 File f = File.createTempFile("jruby", new File(url.getFile()).getName(), getTempDir());
+                f.deleteOnExit();
 
                 try (FileOutputStream fileOut = new FileOutputStream(f);
                      InputStream urlIn = url.openStream()) {
@@ -118,24 +119,10 @@ public class JRubyClassLoader extends ClassDefiningJRubyClassLoader {
         if (tempDir != null) return tempDir;
 
         tempDir = new File(tempDir(), tempDirName());
-        if (tempDir.mkdirs()) {
-            Runtime.getRuntime().addShutdownHook(new Thread() {
-                public void run() {
-                    for (File f : tempDir.listFiles()) {
-                        try {
-                            f.delete();
-                        } catch (Exception ex) {
-                            LOG.debug(ex);
-                        }
-                    }
-                    try {
-                        tempDir.delete();
-                    } catch (Exception ex) {
-                        LOG.info("failed to delete temp dir " + tempDir + " : " + ex);
-                    }
-                }
-            });
-        }
+        tempDir.mkdirs();
+        // Registered before the files in it, so that it is deleted after them. Not a shutdown hook of our own,
+        // because that would keep this class loader alive until the JVM exits.
+        tempDir.deleteOnExit();
         return tempDir;
     }
 
